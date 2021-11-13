@@ -23,28 +23,31 @@ func NewService() *Service {
 }
 
 // Start a service that handles grateful shutdown.
-func (s *Service) Start(addr string) error {
+func (s *Service) Start(addr string) {
 	s.srv.Addr = addr
 
 	// register a goroutine that sends to s.quit on interrupt.
 	signal.Notify(s.srv.quit, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
-		<-s.srv.quit
-		c, cFunc := context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
-		defer cFunc()
-
-		// gracefully terminate the server
-		if err := s.srv.Shutdown(c); err != nil {
-			print(err)
-		}
-	}()
-
 	s.srv.Handler = ownHandler()
 
 	_ = glg.Info(fmt.Sprintf("starting server on: %s", addr))
 
-	return s.srv.ListenAndServe()
+	go func() {
+		if err := s.srv.ListenAndServe(); err != http.ErrServerClosed {
+			panic(err)
+		}
+	}()
+
+	<-s.srv.quit
+
+	c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// gracefully terminate the server
+	if err := s.srv.Shutdown(c); err != nil {
+		print(err)
+	}
 }
 
 // registerHandlers register all handlers for the server.
